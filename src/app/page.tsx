@@ -9,6 +9,7 @@ export default function Home() {
   >([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [aiMode, setAiMode] = useState(false);
 
   // Tampilkan menu awal saat halaman pertama kali dibuka
   useEffect(() => {
@@ -16,7 +17,7 @@ export default function Home() {
       {
         role: "bot",
         content:
-          "🤖 Selamat datang di Self Service BPD Cabang Kerinci! Ada yang bisa saya bantu?\n\n1. Internet mati\n2. Printer tidak menyala\n3. Tinta printer habis\n4. Kertas printer nyangkut\n5. Menu lainnya",
+          "🤖 Selamat datang di Chatbot Program MBG (Penerima Manfaat) — Dapur Polres Kerinci!\n\nPilih salah satu opsi:\n1. Kualitas Makanan\n2. Daerah mana saja yang ada MBG (Kab. Kerinci)\n3. Siapa yang bertanggung jawab di dapur\n4. Hubungi AI\n5. Hubungi Admin Support Dapur MBG",
       },
     ]);
   }, []);
@@ -39,14 +40,75 @@ export default function Home() {
       text === "menu" ||
       text === "kembali ke menu"
     ) {
+      // exit AI mode when returning to menu
+      if (aiMode) setAiMode(false);
       setMessages([
         ...newMessages,
         {
           role: "bot",
           content:
-            "🤖 Berikut menu utama:\n\n1. Internet mati\n2. Printer tidak menyala\n3. Tinta printer habis\n4. Kertas printer nyangkut\n5. Menu lainnya",
+            "🤖 Berikut menu Program MBG (pilih nomor):\n\n1. Kualitas Makanan\n2. Daerah mana saja yang ada MBG (Kab. Kerinci)\n3. Siapa yang bertanggung jawab di dapur\n4. Hubungi AI\n5. Hubungi Admin Support Dapur MBG",
         },
       ]);
+      setLoading(false);
+      return;
+    }
+    // If user typed '4' to choose AI, switch to aiMode and request a welcome from AI
+    if (text === '4') {
+      setAiMode(true);
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: '4' }),
+        });
+        const data = await res.json();
+        setMessages([
+          ...newMessages,
+          { role: 'bot' as const, content: data.reply },
+          { role: 'bot' as const, content: "Ketik 'menu' untuk kembali ke menu awal." },
+        ]);
+      } catch (err) {
+        console.error('Fetch error:', err);
+        setMessages([...newMessages, { role: 'bot' as const, content: '[Fetch error]' }]);
+      }
+      setLoading(false);
+      return;
+    }
+
+    // If user is in aiMode, send messages to AI (prefixing with 4 so backend routes to AI)
+    if (aiMode) {
+      const aiQuestion = input.trim();
+      // send as '4 <question>' so backend treats it as AI query
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: `4 ${aiQuestion}` }),
+        });
+        const data = await res.json();
+          if (res.ok) {
+            setMessages([
+              ...newMessages,
+              { role: 'bot' as const, content: data.reply },
+              { role: 'bot' as const, content: "Ketik 'menu' untuk kembali ke menu awal." },
+            ]);
+          } else {
+            setMessages([
+              ...newMessages,
+              { role: 'bot' as const, content: '[Error] ' + data.error },
+              { role: 'bot' as const, content: "Ketik 'menu' untuk kembali ke menu awal." },
+            ]);
+          }
+      } catch (err) {
+        console.error('Fetch error:', err);
+        setMessages([
+          ...newMessages,
+          { role: 'bot' as const, content: '[Fetch error]' },
+          { role: 'bot' as const, content: "Ketik 'menu' untuk kembali ke menu awal." },
+        ]);
+      }
+
       setLoading(false);
       return;
     }
