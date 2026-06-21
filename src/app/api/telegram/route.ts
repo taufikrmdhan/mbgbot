@@ -25,6 +25,24 @@ export async function POST(req: Request) {
 
     const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 
+    // Helper to send messages to Telegram and log request/response for debugging.
+    async function tgSend(bodyObj: any, method = 'sendMessage', note = '') {
+      try {
+        // Log request (avoid logging TELE_TOKEN)
+        console.log('TG SEND:', note, { method, body: bodyObj });
+        const res = await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/${method}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(bodyObj),
+        });
+        const data = await res.json();
+        console.log('TG RESP:', note, data);
+        return data;
+      } catch (err) {
+        console.error('TG SEND ERROR:', note, err);
+        throw err;
+      }
+    }
     const menuKeyboard = {
       keyboard: [
         [
@@ -56,21 +74,7 @@ export async function POST(req: Request) {
       if (match) {
         const targetChatId = match[1];
 
-        await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
-          method: "POST",
-
-          headers: {
-            "Content-Type": "application/json",
-          },
-
-          body: JSON.stringify({
-            chat_id: targetChatId,
-
-            text: message.text || "(media tidak didukung)",
-
-            reply_markup: menuKeyboard,
-          }),
-        });
+        await tgSend({ chat_id: targetChatId, text: message.text || '(media tidak didukung)', reply_markup: menuKeyboard }, 'sendMessage', 'forward-admin-reply');
 
         return NextResponse.json({
           status: "forwarded",
@@ -203,35 +207,9 @@ MBG_FROM_USER:${chatId}
 Pesan:
 ${userText}`;
 
-      await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
-        method: "POST",
+      await tgSend({ chat_id: ADMIN_CHAT_ID, text: adminMsg }, 'sendMessage', 'notify-admin');
 
-        headers: {
-          "Content-Type": "application/json",
-        },
-
-        body: JSON.stringify({
-          chat_id: ADMIN_CHAT_ID,
-
-          text: adminMsg,
-        }),
-      });
-
-      await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
-        method: "POST",
-
-        headers: {
-          "Content-Type": "application/json",
-        },
-
-        body: JSON.stringify({
-          chat_id: chatId,
-
-          text: "Permintaan Anda sudah diteruskan ke Admin Support.",
-
-          reply_markup: menuKeyboard,
-        }),
-      });
+      await tgSend({ chat_id: chatId, text: 'Permintaan Anda sudah diteruskan ke Admin Support.', reply_markup: menuKeyboard }, 'sendMessage', 'ack-user-admin');
 
       return NextResponse.json({
         status: "admin-notified",
@@ -243,21 +221,7 @@ ${userText}`;
     // ==========================================
 
     if (trimmed === "" || lower === "menu" || lower.startsWith("/start")) {
-      await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
-        method: "POST",
-
-        headers: {
-          "Content-Type": "application/json",
-        },
-
-        body: JSON.stringify({
-          chat_id: chatId,
-
-          text: "Selamat datang di Program MBG Dapur Polres Kerinci. Silakan pilih layanan:",
-
-          reply_markup: menuKeyboard,
-        }),
-      });
+      await tgSend({ chat_id: chatId, text: 'Selamat datang di Program MBG Dapur Polres Kerinci. Silakan pilih layanan:', reply_markup: menuKeyboard }, 'sendMessage', 'send-menu');
 
       return NextResponse.json({
         status: "menu",
@@ -270,23 +234,7 @@ ${userText}`;
 
     const replyText = await getAssistantReply(trimmed);
 
-    await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
-      method: "POST",
-
-      headers: {
-        "Content-Type": "application/json",
-      },
-
-      body: JSON.stringify({
-        chat_id: chatId,
-
-        text: replyText,
-
-        parse_mode: "Markdown",
-
-        reply_markup: menuKeyboard,
-      }),
-    });
+    await tgSend({ chat_id: chatId, text: replyText, parse_mode: 'Markdown', reply_markup: menuKeyboard }, 'sendMessage', 'assistant-reply');
 
     return NextResponse.json({
       status: "success",
