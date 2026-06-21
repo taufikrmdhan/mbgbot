@@ -17,6 +17,15 @@ export async function POST(req: Request) {
     const TELE_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
     const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID; // set this in env to the admin/group chat id
 
+    const menuKeyboard = {
+      keyboard: [
+        [{ text: '1. Kualitas Makanan' }, { text: '2. Daerah Mana Saja MBG (Kab. Kerinci)' }],
+        [{ text: '3. Siapa Penanggung Jawab Dapur' }, { text: '4. Hubungi AI' }],
+        [{ text: '5. Hubungi Admin Support Dapur MBG' }]
+      ],
+      resize_keyboard: true,
+      one_time_keyboard: false
+    };
     // 1) If message is from admin (admin chat), and it's a reply to a bot message containing marker => forward admin reply to original user
     if (String(chatId) === String(ADMIN_CHAT_ID)) {
       const replyTo = message.reply_to_message?.text || '';
@@ -28,7 +37,7 @@ export async function POST(req: Request) {
         await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: targetChatId, text: forwardText })
+          body: JSON.stringify({ chat_id: targetChatId, text: forwardText, reply_markup: menuKeyboard })
         });
 
         // ack to admin
@@ -58,7 +67,7 @@ export async function POST(req: Request) {
         await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: 'Permintaan diterima, namun belum ada petugas terdaftar. Coba lagi nanti.' })
+          body: JSON.stringify({ chat_id: chatId, text: 'Permintaan diterima, namun belum ada petugas terdaftar. Coba lagi nanti.', reply_markup: menuKeyboard })
         });
         return NextResponse.json({ status: 'no-admin-config' });
       }
@@ -78,10 +87,21 @@ export async function POST(req: Request) {
       await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: 'Permintaan Anda telah diteruskan ke petugas. Petugas akan menghubungi Anda melalui chat ini.' })
+        body: JSON.stringify({ chat_id: chatId, text: 'Permintaan Anda telah diteruskan ke petugas. Petugas akan menghubungi Anda melalui chat ini.', reply_markup: menuKeyboard })
       });
 
       return NextResponse.json({ status: 'notified-admin' });
+    }
+
+    // If user sent /start, 'menu', or sent no text (e.g., opened chat), show the menu immediately
+    if (trimmed === '' || lower === '/start' || lower === 'menu') {
+      await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ chat_id: chatId, text: 'Selamat datang di Program MBG - Dapur Polres Kerinci. Silakan pilih layanan:', reply_markup: menuKeyboard })
+      });
+
+      return NextResponse.json({ status: 'menu-sent' });
     }
 
     // 3) Default: normal assistant reply
@@ -94,15 +114,7 @@ export async function POST(req: Request) {
         chat_id: chatId,
         text: replyText,
         parse_mode: 'Markdown',
-        reply_markup: {
-          keyboard: [
-            [{ text: "1. Kualitas Makanan" }, { text: "2. Daerah Mana Saja MBG (Kab. Kerinci)" }],
-            [{ text: "3. Siapa Penanggung Jawab Dapur" }, { text: "4. Hubungi AI" }],
-            [{ text: "5. Hubungi Admin Support Dapur MBG" }]
-          ],
-          resize_keyboard: true,
-          one_time_keyboard: false
-        }
+        reply_markup: menuKeyboard
       }),
     });
 
