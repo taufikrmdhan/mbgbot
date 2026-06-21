@@ -234,7 +234,7 @@ ${userText}`;
 
     const replyText = await getAssistantReply(trimmed);
 
-    await tgSend({ chat_id: chatId, text: replyText, parse_mode: 'Markdown', reply_markup: menuKeyboard }, 'sendMessage', 'assistant-reply');
+    await tgSend({ chat_id: chatId, text: replyText, reply_markup: menuKeyboard }, 'sendMessage', 'assistant-reply');
 
     return NextResponse.json({
       status: "success",
