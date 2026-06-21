@@ -94,7 +94,7 @@ export async function POST(req: Request) {
     }
 
     // If user sent /start, 'menu', or sent no text (e.g., opened chat), show the menu immediately
-    if (trimmed === '' || lower === '/start' || lower === 'menu') {
+    if (trimmed === '' || lower.startsWith('/start') || lower === 'menu') {
       await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
