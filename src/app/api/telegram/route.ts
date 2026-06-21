@@ -54,7 +54,25 @@ export async function POST(req: Request) {
     }
 
     // 2) If user requests to contact admin – support both textual triggers and numeric '5' (no DB needed)
-    const trimmed = userText.trim();
+    // Normalize incoming text: map slash-commands to our menu options so command clicks work
+    let inputRaw = userText || '';
+    // If message contains entities (bot_command) the text will start with '/'
+    const isCommand = inputRaw.trim().startsWith('/');
+    const commandMap: Record<string, string> = {
+      menu: 'menu',
+      kualitas: '1',
+      daerah: '2',
+      penanggungjawab: '3',
+      ai: '4',
+      admin: '5'
+    };
+
+    if (isCommand) {
+      const cmd = inputRaw.trim().split(' ')[0].replace('/', '').split('@')[0].toLowerCase();
+      if (commandMap[cmd]) inputRaw = commandMap[cmd];
+    }
+
+    const trimmed = inputRaw.trim();
     const lower = trimmed.toLowerCase();
 
     // match '5' or '5 <message>' formats
