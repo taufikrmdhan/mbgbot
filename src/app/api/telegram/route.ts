@@ -1,146 +1,306 @@
-import { NextResponse } from 'next/server';
-import getAssistantReply from '../../../lib/assistant';
+import { NextResponse } from "next/server";
+import getAssistantReply from "../../../lib/assistant";
 
-export const dynamic = 'force-dynamic';
+export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
     const body = await req.json();
 
-    const message = body.message;
-    const chatId = message?.chat?.id;
-    const fromId = message?.from?.id;
-    const userText = message?.text || '';
+    console.log("TELEGRAM BODY:", JSON.stringify(body, null, 2));
 
-    if (!chatId) return NextResponse.json({ status: 'ignored' });
+    const message = body.message;
+
+    const chatId = message?.chat?.id;
+
+    const userText = message?.text || "";
+
+    if (!chatId) {
+      return NextResponse.json({
+        status: "ignored",
+      });
+    }
 
     const TELE_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-    const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID; // set this in env to the admin/group chat id
+
+    const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 
     const menuKeyboard = {
       keyboard: [
-        [{ text: '1. Kualitas Makanan' }, { text: '2. Daerah Mana Saja MBG (Kab. Kerinci)' }],
-        [{ text: '3. Siapa Penanggung Jawab Dapur' }, { text: '4. Hubungi AI' }],
-        [{ text: '5. Hubungi Admin Support Dapur MBG' }]
+        [
+          { text: "1. Kualitas Makanan" },
+          { text: "2. Daerah Mana Saja MBG (Kab. Kerinci)" },
+        ],
+
+        [
+          { text: "3. Siapa Penanggung Jawab Dapur" },
+          { text: "4. Hubungi AI" },
+        ],
+
+        [{ text: "5. Hubungi Admin Support Dapur MBG" }],
       ],
+
       resize_keyboard: true,
-      one_time_keyboard: false
+      one_time_keyboard: false,
     };
-    // 1) If message is from admin (admin chat), and it's a reply to a bot message containing marker => forward admin reply to original user
+
+    // ==========================================
+    // ADMIN REPLY FORWARD
+    // ==========================================
+
     if (String(chatId) === String(ADMIN_CHAT_ID)) {
-      const replyTo = message.reply_to_message?.text || '';
-      const m = replyTo.match(/MBG_FROM_USER:(\d+)/);
-      if (m) {
-        const targetChatId = m[1];
-        // forward admin's reply text to the user
-        const forwardText = message.text || '(gambar/meda tidak didukung dalam demo)';
+      const replyTo = message.reply_to_message?.text || "";
+
+      const match = replyTo.match(/MBG_FROM_USER:(\d+)/);
+
+      if (match) {
+        const targetChatId = match[1];
+
         await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: targetChatId, text: forwardText, reply_markup: menuKeyboard })
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+          },
+
+          body: JSON.stringify({
+            chat_id: targetChatId,
+
+            text: message.text || "(media tidak didukung)",
+
+            reply_markup: menuKeyboard,
+          }),
         });
 
-        // ack to admin
-        await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: ADMIN_CHAT_ID, text: 'Pesan telah diteruskan ke penerima manfaat.' })
+        return NextResponse.json({
+          status: "forwarded",
         });
-
-        return NextResponse.json({ status: 'forwarded' });
       }
 
-      return NextResponse.json({ status: 'ignored-admin' });
+      return NextResponse.json({
+        status: "ignored-admin",
+      });
     }
 
-    // 2) If user requests to contact admin – support both textual triggers and numeric '5' (no DB needed)
-    // Normalize incoming text: map slash-commands to our menu options so command clicks work
-    let inputRaw = userText || '';
-    // If message contains entities (bot_command) the text will start with '/'
-    const isCommand = inputRaw.trim().startsWith('/');
+    // ==========================================
+    // NORMALIZE INPUT
+    // ==========================================
+
+    let inputRaw = userText || "";
+
     const commandMap: Record<string, string> = {
-      menu: 'menu',
-      kualitas: '1',
-      daerah: '2',
-      penanggungjawab: '3',
-      ai: '4',
-      admin: '5'
+      menu: "menu",
+
+      kualitas: "1",
+
+      daerah: "2",
+
+      penanggungjawab: "3",
+
+      ai: "4",
+
+      admin: "5",
     };
 
-    if (isCommand) {
-      const cmd = inputRaw.trim().split(' ')[0].replace('/', '').split('@')[0].toLowerCase();
-      if (commandMap[cmd]) inputRaw = commandMap[cmd];
+    // /command
+
+    if (inputRaw.trim().startsWith("/")) {
+      const cmd = inputRaw
+        .trim()
+        .split(" ")[0]
+        .replace("/", "")
+        .split("@")[0]
+        .toLowerCase();
+
+      if (commandMap[cmd]) {
+        inputRaw = commandMap[cmd];
+      }
     }
 
-    const trimmed = inputRaw.trim();
+    let trimmed = inputRaw.trim();
+
+    // BUTTON TELEGRAM
+
+    if (trimmed.startsWith("1.")) trimmed = "1";
+
+    if (trimmed.startsWith("2.")) trimmed = "2";
+
+    if (trimmed.startsWith("3.")) trimmed = "3";
+
+    if (trimmed.startsWith("4.")) trimmed = "4";
+
+    if (trimmed.startsWith("5.")) trimmed = "5";
+
+    // TEXT MANUAL
+
+    const manualMap: Record<string, string> = {
+      kualitas: "1",
+
+      "kualitas makanan": "1",
+
+      daerah: "2",
+
+      wilayah: "2",
+
+      "penanggung jawab": "3",
+
+      penanggungjawab: "3",
+
+      "hubungi ai": "4",
+
+      "tanya ai": "4",
+
+      ai: "4",
+
+      "hubungi admin": "5",
+
+      admin: "5",
+    };
+
+    const lowerInput = trimmed.toLowerCase();
+
+    if (manualMap[lowerInput]) {
+      trimmed = manualMap[lowerInput];
+    }
+
     const lower = trimmed.toLowerCase();
 
-    // match '5' or '5 <message>' formats
-    const m5 = trimmed.match(/^5[\s:\.-]*(.*)$/);
-    const isAdminTrigger = Boolean(m5) || lower.includes('hubungi admin') || lower.includes('chat admin') || lower === 'hubungi admin';
+    console.log("USER TEXT:", userText);
 
-    if (isAdminTrigger) {
+    console.log("PROCESSED:", trimmed);
+
+    // ==========================================
+    // HUBUNGI ADMIN
+    // ==========================================
+
+    if (trimmed === "5" || lower.includes("hubungi admin")) {
       if (!ADMIN_CHAT_ID) {
-        // fallback reply to user if admin chat not configured
         await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: chatId, text: 'Permintaan diterima, namun belum ada petugas terdaftar. Coba lagi nanti.', reply_markup: menuKeyboard })
+          method: "POST",
+
+          headers: {
+            "Content-Type": "application/json",
+          },
+
+          body: JSON.stringify({
+            chat_id: chatId,
+
+            text: "Admin belum dikonfigurasi.",
+
+            reply_markup: menuKeyboard,
+          }),
         });
-        return NextResponse.json({ status: 'no-admin-config' });
+
+        return NextResponse.json({
+          status: "no-admin",
+        });
       }
 
-      // Use message after '5' if present, otherwise use the whole userText
-      const userProvided = (m5 && m5[1] && m5[1].trim()) ? m5[1].trim() : userText;
+      const adminMsg = `Permintaan bantuan MBG
 
-      // notify admin/group — include marker MBG_FROM_USER:<chatId> so admin replies can be routed back
-      const adminMsg = `Permintaan bantuan dari penerima manfaat MBG\nMBG_FROM_USER:${chatId}\nPesan asli: ${userProvided}`;
+MBG_FROM_USER:${chatId}
+
+Pesan:
+${userText}`;
+
       await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: ADMIN_CHAT_ID, text: adminMsg })
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        body: JSON.stringify({
+          chat_id: ADMIN_CHAT_ID,
+
+          text: adminMsg,
+        }),
       });
 
-      // notify user that request is received
       await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: 'Permintaan Anda telah diteruskan ke petugas. Petugas akan menghubungi Anda melalui chat ini.', reply_markup: menuKeyboard })
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        body: JSON.stringify({
+          chat_id: chatId,
+
+          text: "Permintaan Anda sudah diteruskan ke Admin Support.",
+
+          reply_markup: menuKeyboard,
+        }),
       });
 
-      return NextResponse.json({ status: 'notified-admin' });
+      return NextResponse.json({
+        status: "admin-notified",
+      });
     }
 
-    // If user sent /start, 'menu', or sent no text (e.g., opened chat), show the menu immediately
-    if (trimmed === '' || lower.startsWith('/start') || lower === 'menu') {
+    // ==========================================
+    // MENU
+    // ==========================================
+
+    if (trimmed === "" || lower === "menu" || lower.startsWith("/start")) {
       await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, text: 'Selamat datang di Program MBG - Dapur Polres Kerinci. Silakan pilih layanan:', reply_markup: menuKeyboard })
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+        },
+
+        body: JSON.stringify({
+          chat_id: chatId,
+
+          text: "Selamat datang di Program MBG Dapur Polres Kerinci. Silakan pilih layanan:",
+
+          reply_markup: menuKeyboard,
+        }),
       });
 
-      return NextResponse.json({ status: 'menu-sent' });
+      return NextResponse.json({
+        status: "menu",
+      });
     }
 
-    // 3) Default: normal assistant reply
-    const replyText = await getAssistantReply(userText);
+    // ==========================================
+    // AI / ASSISTANT
+    // ==========================================
+
+    const replyText = await getAssistantReply(trimmed);
 
     await fetch(`https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: "POST",
+
+      headers: {
+        "Content-Type": "application/json",
+      },
+
       body: JSON.stringify({
         chat_id: chatId,
+
         text: replyText,
-        parse_mode: 'Markdown',
-        reply_markup: menuKeyboard
+
+        parse_mode: "Markdown",
+
+        reply_markup: menuKeyboard,
       }),
     });
 
-    return NextResponse.json({ status: 'success' });
+    return NextResponse.json({
+      status: "success",
+    });
+  } catch (error) {
+    console.error("TELEGRAM ERROR:", error);
 
-  } catch (error: unknown) {
-    const msg = error instanceof Error ? error.message : 'Unknown error';
-    console.error('Telegram Bot Error:', msg);
-    return NextResponse.json({ status: 'error' }, { status: 500 });
+    return NextResponse.json(
+      {
+        status: "error",
+      },
+      {
+        status: 500,
+      },
+    );
   }
 }
