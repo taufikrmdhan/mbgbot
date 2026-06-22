@@ -3,144 +3,171 @@ import getAssistantReply from "@/lib/assistant";
 
 export const dynamic = "force-dynamic";
 
-const aiSession = new Map<number, boolean>();
+// ======================
+// SESSION STORE (RAM)
+// ======================
+const chatSession = new Map<number, "MENU" | "ADMIN_CHAT" | "AI_CHAT">();
+
+const ADMIN_TAG = "MBG_FROM_USER";
 
 export async function POST(req: Request) {
   try {
-    console.log("STEP 0 - WEBHOOK HIT");
-
     const body = await req.json();
 
     const message = body?.message;
     const chatId = message?.chat?.id;
     const userText = message?.text || "";
 
-    if (!chatId || !userText) {
-      console.log("NO CHAT OR TEXT");
+    if (!chatId) {
       return NextResponse.json({ ok: false });
     }
-
-    console.log("USER:", userText);
 
     const TELE_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
     const ADMIN_CHAT_ID = Number(process.env.ADMIN_CHAT_ID);
 
-    if (!TELE_TOKEN) {
-      throw new Error("TELEGRAM TOKEN MISSING");
-    }
+    if (!TELE_TOKEN) throw new Error("TOKEN MISSING");
 
     // ======================
-    // SEND FUNCTION (SAFE)
+    // SEND FUNCTION
     // ======================
-    async function send(chat_id: number, text: string) {
+    async function send(
+      chat_id: number,
+      text: string,
+      reply_markup?: any
+    ) {
       try {
-        console.log("SEND TO:", chat_id);
-
         const res = await fetch(
           `https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id, text }),
+            body: JSON.stringify({ chat_id, text, reply_markup }),
           }
         );
 
-        const data = await res.json();
-        console.log("TG RESPONSE:", data);
-
-        return data;
+        return await res.json();
       } catch (err) {
         console.error("SEND ERROR:", err);
       }
     }
 
     // ======================
-    // EXIT AI MODE
+    // KEYBOARD MENU
     // ======================
-    if (userText.toLowerCase() === "menu") {
-      aiSession.delete(chatId);
-      await send(chatId, "Keluar dari AI mode. Silakan pilih menu.");
-      return NextResponse.json({ ok: true });
+    const menuKeyboard = {
+      keyboard: [
+        [{ text: "1. Kualitas Makanan" }, { text: "2. Daerah MBG" }],
+        [{ text: "3. Penanggung Jawab" }, { text: "4. Hubungi AI" }],
+        [{ text: "5. Hubungi Admin" }],
+      ],
+      resize_keyboard: true,
+    };
+
+    const closeKeyboard = {
+      keyboard: [[{ text: "✔ Selesai / Tutup Chat" }]],
+      resize_keyboard: true,
+    };
+
+    // ======================
+    // INIT STATE
+    // ======================
+    const state = chatSession.get(chatId) || "MENU";
+
+    console.log("STATE:", state, "USER:", userText);
+
+    // ======================
+    // CLOSE CHAT
+    // ======================
+    if (userText === "✔ Selesai / Tutup Chat") {
+      chatSession.set(chatId, "MENU");
+
+      await send(chatId, "Chat ditutup.");
+      await send(chatId, "Silakan pilih menu:", menuKeyboard);
+
+      return NextResponse.json({ status: "closed" });
     }
 
     // ======================
-    // ADMIN MODE
+    // ADMIN MODE HANDLER
     // ======================
     if (chatId === ADMIN_CHAT_ID) {
-      const replyTo = message?.reply_to_message?.text || "";
-      const match = replyTo.match(/MBG_FROM_USER:(\d+)/);
+      const replied = message?.reply_to_message?.text;
 
-      if (match) {
-        await send(Number(match[1]), userText);
-        return NextResponse.json({ ok: true });
+      if (replied?.includes(ADMIN_TAG)) {
+        const targetChatId = replied
+          .split(ADMIN_TAG + ":")[1]
+          ?.split("\n")[0];
+
+        if (targetChatId) {
+          await send(Number(targetChatId), userText);
+          await send(
+            Number(targetChatId),
+            "Jika sudah selesai, tekan tombol di bawah:",
+            closeKeyboard
+          );
+        }
+
+        return NextResponse.json({ status: "admin-replied" });
       }
+
+      return NextResponse.json({ status: "admin-ignore" });
     }
 
     // ======================
-    // MENU 5 - ADMIN REQUEST
+    // MENU 5 (ADMIN REQUEST)
     // ======================
-    if (
-      userText === "5" ||
-      userText.toLowerCase().includes("admin")
-    ) {
-      aiSession.delete(chatId);
+    if (userText === "5" || userText.includes("admin")) {
+      chatSession.set(chatId, "ADMIN_CHAT");
 
-      if (ADMIN_CHAT_ID) {
-        await send(
-          ADMIN_CHAT_ID,
-          `MBG_FROM_USER:${chatId}\n\n${userText}`
-        );
-      }
+      await send(
+        ADMIN_CHAT_ID,
+        `🚨 TIKET BARU\n\n${ADMIN_TAG}:${chatId}\n\nPesan:\n${userText}`
+      );
 
-      await send(chatId, "Permintaan dikirim ke admin.");
-      return NextResponse.json({ ok: true });
+      await send(chatId, "Permintaan Anda sudah dikirim ke admin.");
+
+      return NextResponse.json({ status: "admin-sent" });
     }
 
     // ======================
-    // MENU 4 - AI MODE ON
+    // MENU 4 (AI MODE)
     // ======================
-    if (
-      userText === "4" ||
-      userText.toLowerCase().includes("ai")
-    ) {
-      aiSession.set(chatId, true);
+    if (userText === "4" || userText.includes("ai")) {
+      chatSession.set(chatId, "AI_CHAT");
 
       const intro = await getOpenRouterReply(
-        "Sapa user sebagai AI MBG secara singkat dan ramah"
+        "Sapa user sebagai AI MBG secara singkat"
       );
 
       await send(chatId, intro);
-      return NextResponse.json({ ok: true });
+
+      return NextResponse.json({ status: "ai-start" });
     }
 
     // ======================
-    // AI CONTINUATION MODE
+    // AI CHAT MODE
     // ======================
-    if (aiSession.get(chatId)) {
-      console.log("AI MODE ACTIVE");
-
+    if (state === "AI_CHAT") {
       const aiReply = await getOpenRouterReply(userText);
 
-      await send(chatId, aiReply || "AI tidak menjawab.");
-      return NextResponse.json({ ok: true });
+      await send(chatId, aiReply);
+      return NextResponse.json({ status: "ai-chat" });
     }
 
     // ======================
-    // NORMAL BOT MODE
+    // NORMAL MODE
     // ======================
     const reply = await getAssistantReply(userText);
 
-    await send(chatId, reply);
+    await send(chatId, reply, menuKeyboard);
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ status: "ok" });
 
     // ======================
-    // OPENROUTER AI SAFE
+    // OPENROUTER AI
     // ======================
     async function getOpenRouterReply(message: string) {
       try {
-        console.log("AI REQUEST:", message);
-
         const apiKey = process.env.OPENROUTER_API_KEY;
         if (!apiKey) return "AI belum aktif.";
 
@@ -158,7 +185,7 @@ export async function POST(req: Request) {
                 {
                   role: "system",
                   content:
-                    "You are MBG assistant. Answer short, helpful, focus on food, logistics, and quality.",
+                    "You are MBG assistant. Answer short and helpful.",
                 },
                 { role: "user", content: message },
               ],
@@ -169,19 +196,17 @@ export async function POST(req: Request) {
 
         const data = await res.json();
 
-        console.log("AI RESPONSE:", data);
-
         return (
           data?.choices?.[0]?.message?.content ||
-          "AI tidak dapat menjawab saat ini."
+          "AI tidak dapat menjawab."
         );
       } catch (err) {
-        console.error("AI ERROR:", err);
-        return "AI sedang error, coba lagi nanti.";
+        console.error(err);
+        return "AI error.";
       }
     }
   } catch (err) {
-    console.error("FATAL ERROR:", err);
+    console.error("FATAL:", err);
     return NextResponse.json({ ok: false }, { status: 500 });
   }
 }
