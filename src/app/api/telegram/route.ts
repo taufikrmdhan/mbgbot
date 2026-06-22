@@ -75,7 +75,7 @@ export async function POST(req: Request) {
     };
 
     // ==========================
-    // ADMIN REPLY
+    // ADMIN MODE
     // ==========================
     if (String(chatId) === String(ADMIN_CHAT_ID)) {
       const replyTo = message.reply_to_message?.text || "";
@@ -84,15 +84,11 @@ export async function POST(req: Request) {
       if (match) {
         const targetChatId = match[1];
 
-        await tgSend(
-          {
-            chat_id: targetChatId,
-            text: message.text || "(media tidak didukung)",
-            reply_markup: menuKeyboard,
-          },
-          "sendMessage",
-          "admin-reply"
-        );
+        await tgSend({
+          chat_id: targetChatId,
+          text: message.text || "(media tidak didukung)",
+          reply_markup: menuKeyboard,
+        });
 
         return NextResponse.json({ status: "forwarded" });
       }
@@ -101,15 +97,18 @@ export async function POST(req: Request) {
     }
 
     // ==========================
-    // NORMALIZE INPUT (PENTING)
+    // NORMALIZE INPUT (FIX UTAMA)
     // ==========================
-    let inputRaw = (userText || "").trim().toLowerCase();
-
-    // hapus @bot
-    inputRaw = inputRaw.replace(/@\w+/g, "").trim();
+    let inputRaw = (userText || "")
+      .trim()
+      .toLowerCase()
+      .replace(/@\w+/g, "");
 
     console.log("AFTER NORMALIZE:", inputRaw);
 
+    // ==========================
+    // COMMAND HANDLER
+    // ==========================
     const commandMap: Record<string, string> = {
       menu: "menu",
       kualitas: "1",
@@ -119,29 +118,23 @@ export async function POST(req: Request) {
       admin: "5",
     };
 
-    // ==========================
-    // HANDLE /COMMAND
-    // ==========================
+    // handle /command
     if (inputRaw.startsWith("/")) {
       const parts = inputRaw.split(" ");
-
-      const cmd = parts[0]
-        .replace("/", "")
-        .toLowerCase();
+      const cmd = parts[0].replace("/", "");
 
       if (commandMap[cmd]) {
-        if (parts.length === 1) {
-          inputRaw = commandMap[cmd];
-        } else {
-          inputRaw = `${commandMap[cmd]} ${parts.slice(1).join(" ")}`;
-        }
+        inputRaw =
+          parts.length === 1
+            ? commandMap[cmd]
+            : `${commandMap[cmd]} ${parts.slice(1).join(" ")}`;
       }
     }
 
     let processed = inputRaw.trim();
 
     // ==========================
-    // BUTTON CLEANING
+    // BUTTON CLEAN
     // ==========================
     if (processed.startsWith("1.")) processed = "1";
     if (processed.startsWith("2.")) processed = "2";
@@ -165,24 +158,16 @@ export async function POST(req: Request) {
         return NextResponse.json({ status: "no-admin" });
       }
 
-      await tgSend(
-        {
-          chat_id: ADMIN_CHAT_ID,
-          text: `Permintaan bantuan MBG\n\nMBG_FROM_USER:${chatId}\n\nPesan:\n${userText}`,
-        },
-        "sendMessage",
-        "notify-admin"
-      );
+      await tgSend({
+        chat_id: ADMIN_CHAT_ID,
+        text: `Permintaan bantuan MBG\n\nMBG_FROM_USER:${chatId}\n\nPesan:\n${userText}`,
+      });
 
-      await tgSend(
-        {
-          chat_id: chatId,
-          text: "Permintaan Anda sudah diteruskan ke Admin Support.",
-          reply_markup: menuKeyboard,
-        },
-        "sendMessage",
-        "ack-admin"
-      );
+      await tgSend({
+        chat_id: chatId,
+        text: "Permintaan Anda sudah diteruskan ke Admin Support.",
+        reply_markup: menuKeyboard,
+      });
 
       return NextResponse.json({ status: "admin-sent" });
     }
@@ -196,35 +181,27 @@ export async function POST(req: Request) {
       inputRaw === "start";
 
     if (processed === "" || processed === "menu" || isStart) {
-      await tgSend(
-        {
-          chat_id: chatId,
-          text: "Selamat datang di Program MBG Dapur Polres Kerinci.",
-          reply_markup: menuKeyboard,
-        },
-        "sendMessage",
-        "menu"
-      );
+      await tgSend({
+        chat_id: chatId,
+        text: "Selamat datang di Program MBG Dapur Polres Kerinci.",
+        reply_markup: menuKeyboard,
+      });
 
       return NextResponse.json({ status: "menu" });
     }
 
     // ==========================
-    // ASSISTANT (INI YANG PENTING)
+    // ASSISTANT (FIX FINAL)
     // ==========================
     console.log("KIRIM KE ASSISTANT:", inputRaw);
 
     const replyText = await getAssistantReply(inputRaw);
 
-    await tgSend(
-      {
-        chat_id: chatId,
-        text: replyText,
-        reply_markup: menuKeyboard,
-      },
-      "sendMessage",
-      "assistant"
-    );
+    await tgSend({
+      chat_id: chatId,
+      text: replyText,
+      reply_markup: menuKeyboard,
+    });
 
     return NextResponse.json({ status: "success" });
 
