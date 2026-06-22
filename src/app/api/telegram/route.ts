@@ -3,12 +3,12 @@ import getAssistantReply from "@/lib/assistant";
 
 export const dynamic = "force-dynamic";
 
-// ======================
-// SESSION STORE (RAM)
-// ======================
-const chatSession = new Map<number, "MENU" | "ADMIN_CHAT" | "AI_CHAT">();
-
-const ADMIN_TAG = "MBG_FROM_USER";
+// =========================
+// MEMORY (SIMPLE STATE)
+// =========================
+const tickets = new Map<string, number>(); // ticketId -> userId
+const adminSession = new Map<number, string>(); // adminId -> ticketId
+const userSession = new Map<number, string>(); // userId -> ticketId
 
 export async function POST(req: Request) {
   try {
@@ -16,70 +16,37 @@ export async function POST(req: Request) {
 
     const message = body?.message;
     const chatId = message?.chat?.id;
-    const userText = message?.text || "";
+    const text = message?.text || "";
 
-    if (!chatId) {
-      return NextResponse.json({ ok: false });
-    }
+    if (!chatId) return NextResponse.json({ ok: false });
 
-    const TELE_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+    const TELE_TOKEN = process.env.TELEGRAM_BOT_TOKEN!;
     const ADMIN_CHAT_ID = Number(process.env.ADMIN_CHAT_ID);
 
-    if (!TELE_TOKEN) throw new Error("TOKEN MISSING");
-
-    // ======================
+    // =========================
     // SEND FUNCTION
-    // ======================
-    async function send(
-      chat_id: number,
-      text: string,
-      reply_markup?: any
-    ) {
-      try {
-        const res = await fetch(
-          `https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chat_id, text, reply_markup }),
-          }
-        );
-
-        return await res.json();
-      } catch (err) {
-        console.error("SEND ERROR:", err);
-      }
+    // =========================
+    async function send(chat_id: number, text: string, reply_markup?: any) {
+      return fetch(
+        `https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id, text, reply_markup }),
+        }
+      );
     }
 
-    // ======================
-    // KEYBOARD MENU
-    // ======================
-    const menuKeyboard = {
-      keyboard: [
-        [{ text: "1. Kualitas Makanan" }, { text: "2. Daerah MBG" }],
-        [{ text: "3. Penanggung Jawab" }, { text: "4. Hubungi AI" }],
-        [{ text: "5. Hubungi Admin" }],
-      ],
-      resize_keyboard: true,
-    };
+    // =========================
+    // CLOSE TICKET (USER)
+    // =========================
+    if (text === "✔ Selesai / Tutup Chat") {
+      const ticketId = userSession.get(chatId);
 
-    const closeKeyboard = {
-      keyboard: [[{ text: "✔ Selesai / Tutup Chat" }]],
-      resize_keyboard: true,
-    };
-
-    // ======================
-    // INIT STATE
-    // ======================
-    const state = chatSession.get(chatId) || "MENU";
-
-    console.log("STATE:", state, "USER:", userText);
-
-    // ======================
-    // CLOSE CHAT
-    // ======================
-    if (userText === "✔ Selesai / Tutup Chat") {
-      chatSession.set(chatId, "MENU");
+      if (ticketId) {
+        tickets.delete(ticketId);
+        userSession.delete(chatId);
+      }
 
       await send(chatId, "Chat ditutup.");
       await send(chatId, "Silakan pilih menu:", menuKeyboard);
@@ -87,126 +54,92 @@ export async function POST(req: Request) {
       return NextResponse.json({ status: "closed" });
     }
 
-    // ======================
+    // =========================
     // ADMIN MODE HANDLER
-    // ======================
+    // =========================
     if (chatId === ADMIN_CHAT_ID) {
-      const replied = message?.reply_to_message?.text;
+      const sessionTicket = adminSession.get(chatId);
 
-      if (replied?.includes(ADMIN_TAG)) {
-        const targetChatId = replied
-          .split(ADMIN_TAG + ":")[1]
-          ?.split("\n")[0];
+      // 1. ADMIN START LIVE CHAT
+      if (text.startsWith("REPLY:")) {
+        const ticketId = text.replace("REPLY:", "").trim();
+        adminSession.set(chatId, ticketId);
 
-        if (targetChatId) {
-          await send(Number(targetChatId), userText);
-          await send(
-            Number(targetChatId),
-            "Jika sudah selesai, tekan tombol di bawah:",
-            closeKeyboard
-          );
-        }
-
-        return NextResponse.json({ status: "admin-replied" });
+        await send(chatId, `🟢 Live chat dimulai untuk ${ticketId}`);
+        return NextResponse.json({ status: "admin-live-start" });
       }
 
-      return NextResponse.json({ status: "admin-ignore" });
+      // 2. ADMIN SEND MESSAGE (LIVE CHAT)
+      if (sessionTicket) {
+        const userId = tickets.get(sessionTicket);
+
+        if (userId) {
+          await send(userId, `👨‍💼 Admin:\n${text}`);
+
+          await send(userId, "Jika selesai, klik tombol:", closeKeyboard);
+        }
+
+        return NextResponse.json({ status: "admin-live-msg" });
+      }
+
+      return NextResponse.json({ status: "admin-idle" });
     }
 
-    // ======================
-    // MENU 5 (ADMIN REQUEST)
-    // ======================
-    if (userText === "5" || userText.includes("admin")) {
-      chatSession.set(chatId, "ADMIN_CHAT");
+    // =========================
+    // MENU 5 → CREATE TICKET
+    // =========================
+    if (text === "5" || text.toLowerCase().includes("admin")) {
+      const ticketId = `TICKET-${Date.now()}`;
+
+      tickets.set(ticketId, chatId);
+      userSession.set(chatId, ticketId);
 
       await send(
         ADMIN_CHAT_ID,
-        `🚨 TIKET BARU\n\n${ADMIN_TAG}:${chatId}\n\nPesan:\n${userText}`
+        `🚨 TICKET BARU
+
+🎫 ${ticketId}
+👤 User: ${chatId}
+
+💬 ${text}
+
+Balas:
+REPLY:${ticketId}`
       );
 
       await send(chatId, "Permintaan Anda sudah dikirim ke admin.");
 
-      return NextResponse.json({ status: "admin-sent" });
+      return NextResponse.json({ status: "ticket-created" });
     }
 
-    // ======================
-    // MENU 4 (AI MODE)
-    // ======================
-    if (userText === "4" || userText.includes("ai")) {
-      chatSession.set(chatId, "AI_CHAT");
-
-      const intro = await getOpenRouterReply(
-        "Sapa user sebagai AI MBG secara singkat"
-      );
-
-      await send(chatId, intro);
-
-      return NextResponse.json({ status: "ai-start" });
-    }
-
-    // ======================
-    // AI CHAT MODE
-    // ======================
-    if (state === "AI_CHAT") {
-      const aiReply = await getOpenRouterReply(userText);
-
-      await send(chatId, aiReply);
-      return NextResponse.json({ status: "ai-chat" });
-    }
-
-    // ======================
-    // NORMAL MODE
-    // ======================
-    const reply = await getAssistantReply(userText);
+    // =========================
+    // NORMAL USER MESSAGE (NO SESSION)
+    // =========================
+    const reply = await getAssistantReply(text);
 
     await send(chatId, reply, menuKeyboard);
 
     return NextResponse.json({ status: "ok" });
 
-    // ======================
-    // OPENROUTER AI
-    // ======================
-    async function getOpenRouterReply(message: string) {
-      try {
-        const apiKey = process.env.OPENROUTER_API_KEY;
-        if (!apiKey) return "AI belum aktif.";
-
-        const res = await fetch(
-          "https://openrouter.ai/api/v1/chat/completions",
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${apiKey}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              model: "meta-llama/llama-3.1-8b-instruct",
-              messages: [
-                {
-                  role: "system",
-                  content:
-                    "You are MBG assistant. Answer short and helpful.",
-                },
-                { role: "user", content: message },
-              ],
-              max_tokens: 300,
-            }),
-          }
-        );
-
-        const data = await res.json();
-
-        return (
-          data?.choices?.[0]?.message?.content ||
-          "AI tidak dapat menjawab."
-        );
-      } catch (err) {
-        console.error(err);
-        return "AI error.";
-      }
-    }
   } catch (err) {
-    console.error("FATAL:", err);
+    console.error(err);
     return NextResponse.json({ ok: false }, { status: 500 });
   }
 }
+
+// =========================
+// KEYBOARDS
+// =========================
+const menuKeyboard = {
+  keyboard: [
+    [{ text: "1. Kualitas Makanan" }, { text: "2. Daerah MBG" }],
+    [{ text: "3. Penanggung Jawab" }, { text: "4. Hubungi AI" }],
+    [{ text: "5. Hubungi Admin" }],
+  ],
+  resize_keyboard: true,
+};
+
+const closeKeyboard = {
+  keyboard: [[{ text: "✔ Selesai / Tutup Chat" }]],
+  resize_keyboard: true,
+};
