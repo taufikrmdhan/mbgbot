@@ -8,32 +8,141 @@ export async function POST(req: Request) {
     const body = await req.json();
 
     const message = body.message;
-    if (!message) return NextResponse.json({ ok: false });
-
     const chatId = message?.chat?.id;
     const userText = message?.text || "";
 
-    if (!chatId) return NextResponse.json({ ok: false });
+    if (!chatId || !userText) {
+      return NextResponse.json({ ok: false });
+    }
 
-    console.log("TELEGRAM:", userText);
+    const TELE_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+    const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID;
 
-    const replyText = await getAssistantReply(userText);
+    const text = userText.trim().toLowerCase();
 
-    await fetch(
-      `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chat_id: chatId,
-          text: replyText,
-        }),
+    // ==========================
+    // ADMIN MODE (REPLY FORWARD)
+    // ==========================
+    if (String(chatId) === String(ADMIN_CHAT_ID)) {
+      const replyTo = message?.reply_to_message?.text || "";
+      const match = replyTo.match(/MBG_FROM_USER:(\d+)/);
+
+      if (match) {
+        const targetChatId = match[1];
+
+        await fetch(
+          `https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: targetChatId,
+              text: userText,
+            }),
+          }
+        );
+
+        return NextResponse.json({ status: "forwarded" });
       }
-    );
+    }
+
+    // ==========================
+    // MENU 5 - ADMIN REQUEST
+    // ==========================
+    if (text === "5" || text.includes("admin")) {
+      if (ADMIN_CHAT_ID) {
+        await fetch(
+          `https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              chat_id: ADMIN_CHAT_ID,
+              text: `MBG_FROM_USER:${chatId}\n\nPesan:\n${userText}`,
+            }),
+          }
+        );
+
+        await send(chatId, "Permintaan Anda sudah dikirim ke Admin.");
+      }
+
+      return NextResponse.json({ ok: true });
+    }
+
+    // ==========================
+    // MENU 4 - AI MODE SPECIAL
+    // ==========================
+    if (
+      text === "4" ||
+      text.includes("ai") ||
+      text.includes("hubungi ai")
+    ) {
+      const aiReply = await getOpenRouterReply(userText);
+
+      await send(chatId, aiReply);
+      return NextResponse.json({ ok: true });
+    }
+
+    // ==========================
+    // DEFAULT ASSISTANT
+    // ==========================
+    const reply = await getAssistantReply(userText);
+    await send(chatId, reply);
 
     return NextResponse.json({ ok: true });
+
+    // ==========================
+    // SEND FUNCTION
+    // ==========================
+    async function send(chatId: number, text: string) {
+      await fetch(
+        `https://api.telegram.org/bot${TELE_TOKEN}/sendMessage`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ chat_id: chatId, text }),
+        }
+      );
+    }
+
+    // ==========================
+    // OPENROUTER AI
+    // ==========================
+    async function getOpenRouterReply(message: string) {
+      const apiKey = process.env.OPENROUTER_API_KEY;
+      if (!apiKey) return "AI belum aktif.";
+
+      const res = await fetch(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            model: "meta-llama/llama-3.1-8b-instruct",
+            messages: [
+              {
+                role: "system",
+                content:
+                  "You are MBG assistant. Answer short and helpful.",
+              },
+              { role: "user", content: message },
+            ],
+            max_tokens: 300,
+          }),
+        }
+      );
+
+      const data = await res.json();
+      return (
+        data?.choices?.[0]?.message?.content ||
+        "AI tidak bisa menjawab."
+      );
+    }
   } catch (err) {
-    console.error("TELEGRAM ERROR:", err);
+    console.error(err);
     return NextResponse.json({ ok: false }, { status: 500 });
   }
 }
